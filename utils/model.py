@@ -17,9 +17,6 @@ import utils.optimisers
 def applyConvolutions(events, convolutions):
   
   outputs = []
-  num = []
-  masks = []
-  masks_normalised = []
   for c in convolutions:
     filtered = c(events)
     outputs.append(filtered)
@@ -78,6 +75,9 @@ def buildModel(nPixels=64, kernelSize=2, nConvolutions=9, lr=5.e-5, lossWeights=
     with tf.device('/cpu:0'):
       cpumodel = Model(inputs=input, outputs=events)
     model = multi_gpu_model(cpumodel, gpus=nGPUs)
+  else:
+    model = Model(inputs=input, outputs=events)
+
 
   model.compile(loss=[utils.losses.activeLoss(lossWeights)], optimizer=Nadam(lr=lr))
   if nGPUs > 0:
@@ -85,3 +85,8 @@ def buildModel(nPixels=64, kernelSize=2, nConvolutions=9, lr=5.e-5, lossWeights=
   else:
     model.summary()
   return model
+
+
+
+
+
