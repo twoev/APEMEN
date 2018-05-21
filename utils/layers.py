@@ -72,5 +72,80 @@ class MergeDeconvolution(Layer):
   def call(self, x):
     return K.sum(x, axis=3, keepdims=True)
 
+def MergeShower(Layer):
+
+  def __init__(self, cutoff=20., kernelSize=2, **kwargs):
+    self.kernelSize = kernelSize
+    self.cutoff=cutoff
+    self.window = K.variable(np.ones((kernelSize, kernelSize, 1, 1)))
+    
+    super(MergeShower, self).__init__(**kwargs)
+
+  def compute_output_shape(self, input_shape):
+    if len(input_shape) != 2:
+      raise RuntimeError("MergeShower layer requries two input images to merge")
+
+    if input_shape[0] != input_shape[1]:
+      raise RuntimeError("MergeShower layer requries two equal sized images to merge")
+
+    return input_shape[0]
+
+#  return image where all pixels below the cutoff are set to zero
+  def aboveCutoff(image):
+    image = image - self.cutoff
+    return 0.5*(image + K.abs(image)) + self.cutoff
+
+  def call(self, input):
+    # This is the part of the pre-shower image that is above the cutoff
+    me = aboveCutoff(input[0])
+    # This is the part of the post-shower image that is above the cutoff
+    showered = aboveCutoff(input[1])
+    # This is the soft part of the post-shower image. We will not modify this contribution
+    soft = input[1] - showered
+
+    # This is 1 where there is a ME emission, zero everywhere else
+    meActive = 0.5*(K.sign(me - 1.) + 1.)
+    # And this one then counts the number of ME emissions in each k X k window
+    meSum = K.conv2d(meActive, self.window, strides=(self.kernelSize, self.kernelSize), data_format="channels_last")
+    
+    # This then is one if the window contains 2 or more ME emissions, zero otherwise
+    #  Which indicates there was a splitting at the previous level
+    meSplitting = 0.5*(K.sign(meSum - 1.1)+1.)
+    # And upscale it to the original size
+    meSplitting = K.resize_images(meSplitting, height_factor=self.kernelSize, width_factor=self.kernelSize, data_format="channels_last")
+
+    # This contains all the hard emissions from the shower that match the ME splittings
+    shower_allowed = showered * meSplitting
+
+    # And these shower emissions should be reclustered!
+    to_recluster = showered - shower_allowed
+
+    # We find the location of the reclustered emission by pooling over the window to find the value of the hardest emission, subtract that from all pixels in the window, then take the sign -> the +ve pixel is the reclustered location
+    reclustered_position = 0.5*(K.sign(to_recluster + 1.e-5 - K.resize_images(K.pool2d(to_recluster, pool_size=(self.kernelSize, self.kernelSize), strides=(self.kernelSize, self.kernelSize), pool_mode="max", data_format="channels_last"), height_factor=self.kernelSize, width_factor=self.kernelSize, data_format="channels_last")) + 1.)
+
+    # Sum over all emissions in the window to find the reclustered value
+    reclustered = K.conv2d(to_recluster, self.window, strides=(self.kernelSize, self.kernelSize), data_format="channels_last")
+    # Then up-scale and multiply by the location so that only one pixel in the window is non-zero
+    reclustered = K.resize_images(reclustered, height_factor=self.kernelSize, width_factor=self.kernelSize, data_format="channels_last") * reclustered_position
+
+    # The final mereged emissions are the soft part + the allowed shower + the reclustered shower
+    return shower_allowed + reclustered + soft
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
