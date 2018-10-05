@@ -40,9 +40,10 @@ def applyDeconvolutions(events, deconvolutions, mask):
 
   return events
 
-def buildModel(nPixels=64, kernelSize=2, nConvolutions=9, lr=5.e-5, lossWeights=[100,10,1], kernel_regularisation=100., nGPUs=2):
+def buildModel(nPixels=64, kernelSize=2, nConvolutions=9, lr=5.e-5, lossWeights=[100,10,1], kernel_regularisation=100., nGPUs=2, merge_shower=False):
 
   nLevels = math.log(nPixels, kernelSize) - 1
+
   m=nLevels%1
   if m > 1.e-5 and m < 1.-1.e-5:
     raise RuntimeError("The pixel array size, N, does not have the kernel size, k, as radix.  Require N=k^n, have N=" + str(nPixels) + ", k=" + str(kernelSize))
@@ -60,16 +61,31 @@ def buildModel(nPixels=64, kernelSize=2, nConvolutions=9, lr=5.e-5, lossWeights=
 
   shrink = MaxPooling2D(pool_size=kernelSize)
 
+  if merge_shower:
+    showerMerge = []
+    angularScale=np.pi / float(kernelSize)
+    cutoff0 = 20.
+    for i in range(nLevels):
+      cutoff = cutoff0 / (1. - np.cos(angularScale))
+      showerMerge.append(utils.layers.MergeShower(kernelSize=kernelSize, cutoff=cutoff))
+      angularScale = angularScale / (float(kernelSize))
+    preShower = []
+
   filterMasks = []
   events = input
 
   for i in range(nLevels):
+    if merge_shower:
+      preShower.append(events)
     events, mask = applyConvolutions(events, conv)
     events = shrink(events)
     filterMasks.append(mask)
 
   for i in range(nLevels):
     events = applyDeconvolutions(events, deconv, filterMasks[-1-i])
+    if merge_shower:
+      events = showerMerge[i]([preShower[-i-1], events])
+
 
   if nGPUs > 0:
     with tf.device('/cpu:0'):
