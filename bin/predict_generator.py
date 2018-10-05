@@ -67,7 +67,7 @@ epsilon = 0.1
 nBins = args.pixels
 binWidth = 2.*np.pi / float(nBins)
 
-model = modelBuilder.buildModel(nPixels=args.pixels, lr=2.e-5, kernel_regularisation=50., kernelSize=args.kernel, nConvolutions=args.convolutions)
+model = modelBuilder.buildModel(nPixels=args.pixels, lr=2.e-5, kernel_regularisation=50., kernelSize=args.kernel, nConvolutions=args.convolutions, merge_shower=True)
 
 print "loading weights from " + args.weights
 model.load_weights(args.weights)
