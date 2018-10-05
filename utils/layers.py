@@ -73,11 +73,23 @@ class MergeDeconvolution(Layer):
   def call(self, x):
     return K.sum(x, axis=3, keepdims=True)
 
+
+# This layer should be used at evaluation time to merge a matrix element calculation with the CNN shower model
+# The call method takes two images of the same size.  One is the input to the conv2d layer in the compression side 
+# of the autoencoder.  The other image is the output of the conv2dtranspose layer on the deconvolution side of the
+# autoencoder.  By comparing them, we can test which new emissions have been added by the CNN and veto them according 
+# to some (angular dependent) cutoff scale
 class MergeShower(Layer):
 
+
+  #  The merge layer takes a cutoff scale and a kernel size used in the model
+  #  Note the cutoff scale should be set with care according to the depth in the network.  
+  #  At the network bottleneck the cutoff should match the matrix element cutoff.
+  #  The cutoff evolves away from the bottleneck
   def __init__(self, cutoff=20., kernelSize=2, **kwargs):
     self.kernelSize = kernelSize
     self.cutoff=cutoff
+    # This kernel is used for summing the number of emissions in each window the same size as the shower kernel
     self.window = K.variable(np.ones((kernelSize, kernelSize, 1, 1)))
     
     super(MergeShower, self).__init__(**kwargs)
@@ -106,6 +118,8 @@ class MergeShower(Layer):
     soft = input[1] - showered
 
     # This is one in each pixel where the shower has a hard emission
+    # Note this would go wrong if an unfeasibly low merging scale of 1 GeV or less were used (in which case 
+    # simply lower the value of the 1. used inside the K.sign function)
     showerMask = 0.5*(K.sign(showered - 1.) + 1.)
     # And this is one where the pre-shower has a hard emission
     meMask = 0.5*(K.sign(me - 1.) + 1.)
@@ -124,65 +138,16 @@ class MergeShower(Layer):
     showerSum = K.conv2d(showered, self.window, strides=(self.kernelSize, self.kernelSize), data_format="channels_last")
     outputSum = K.conv2d(input[1], self.window, strides=(self.kernelSize, self.kernelSize), data_format="channels_last")
     
+    # This ratio is a correction factor that is the total hard shower emissions in each window divided by the total emissions in each window
     ratio = K.resize_images((showerSum / (outputSum + 1.e-5)), height_factor=self.kernelSize, width_factor=self.kernelSize, data_format="channels_last")
     
-    # And these emissions must be vetoed and replaced with the ME emissions
-    #vetoed = showered * emissionForbidden
-    
-    # Find the ME and soft contributions in the veto regions
+    # Find the ME contributions in the veto regions
     meInVeto = me * emissionForbidden
-    #softInVeto = soft * emissionForbidden
     
-    # Correct the ME emissions in the veto regions by subtracting the soft emissions, which are allowed
-    #meSum   = K.conv2d(meInVeto, self.window, strides=(self.kernelSize, self.kernelSize), data_format="channels_last")
-    #softSum = K.conv2d(softInVeto, self.window, strides=(self.kernelSize, self.kernelSize), data_format="channels_last")
-    #ratio = K.resize_images((meSum - softSum) / (meSum + 1.e-5), height_factor=self.kernelSize, width_factor=self.kernelSize, data_format="channels_last")
-    
+    # the result should be the shower in the allowed regions, the soft part of the shower (below the cutoff) plus the original 
+    # pre-shower component in the shower-forbidden regions, modified by a scaling factor to account for any allowed soft emissions
     return shower_allowed + soft + meInVeto*ratio
 
-#softSum = K.conv2d(soft, self.window, strides=(self.kernelSize, self.kernelSize), data_format="channels_last")
-#   meSum = K.conv2d(input[0], self.window, strides=(self.kernelSize, self.kernelSize), data_format="channels_last")
-
-#   ratio = K.resize_images((meSum - softSum) / (meSum + 1.e-5), height_factor=self.kernelSize, width_factor=self.kernelSize, data_format="channels_last")
-#   me = self.aboveCutoff(input[0] * ratio)
-
-#   return me + soft
-    
-#    meSum = K.conv2d(me, self.window, strides=(self.kernelSize, self.kernelSize), data_format="channels_last")
-
-
-    
-    
-    # This is 1 where there is a ME emission, zero everywhere else
- #   meActive = 0.5*(K.sign(me - 1.) + 1.)
-    # And this one then counts the number of ME emissions in each k X k window
- #   meSum = K.conv2d(meActive, self.window, strides=(self.kernelSize, self.kernelSize), data_format="channels_last")
-    
-    # This then is one if the window contains 2 or more ME emissions, zero otherwise
-    #  Which indicates there was a splitting at the previous level
- #   meSplitting = 0.5*(K.sign(meSum - 1.1)+1.)
-    # And upscale it to the original size
- #   meSplitting = K.resize_images(meSplitting, height_factor=self.kernelSize, width_factor=self.kernelSize, data_format="channels_last")
-
-    # This contains all the hard emissions from the shower that match the ME splittings
- #   shower_allowed = showered * meSplitting
-
-    # And these shower emissions should be reclustered!
- #   to_recluster = showered - shower_allowed
-
-    # We find the location of the reclustered emission by pooling over the window to find the value of the hardest emission, subtract that from all pixels in the window, then take the sign -> the +ve pixel is the reclustered location
- #   reclustered_position = 0.5*(K.sign(to_recluster + 1.e-5 - K.resize_images(K.pool2d(to_recluster, pool_size=(self.kernelSize, self.kernelSize), strides=(self.kernelSize, self.kernelSize), pool_mode="max", data_format="channels_last"), height_factor=self.kernelSize, width_factor=self.kernelSize, data_format="channels_last")) + 1.)
-
-    # Sum over all emissions in the window to find the reclustered value
- #   reclustered = K.conv2d(to_recluster, self.window, strides=(self.kernelSize, self.kernelSize), data_format="channels_last")
-    # Then up-scale and multiply by the location so that only one pixel in the window is non-zero
- #   reclustered = K.resize_images(reclustered, height_factor=self.kernelSize, width_factor=self.kernelSize, data_format="channels_last") * reclustered_position
-
-    # The final mereged emissions are the soft part + the allowed shower + the reclustered shower
-#return shower_allowed + reclustered + soft
-#return me * K.sum(showered, axis=(1,2,3), keepdims=True) / (K.sum(me, axis=(1,2,3), keepdims=True) + 1.e-5) + soft
- #   return soft + shower_allowed + reclustered
-#return soft + me
 
 
 
