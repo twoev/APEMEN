@@ -35,7 +35,7 @@ except:
   
 np.random.seed(args.randomSeed)
 
-model = modelBuilder.buildModel(nPixels=args.pixels, kernelSize=args.kernel, lr=args.learning_rate, kernel_regularisation=300., lossWeights=[10,2,1], nConvolutions=args.convolutions)
+model = modelBuilder.buildModel(nPixels=args.pixels, kernelSize=args.kernel, lr=args.learning_rate, kernel_regularisation=500., lossWeights=[5,2,1], nConvolutions=args.convolutions)
 
 doWeights = False
 
